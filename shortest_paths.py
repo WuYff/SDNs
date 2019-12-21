@@ -40,8 +40,8 @@ class ShortestPathSwitching(app_manager.RyuApp):
         super(ShortestPathSwitching, self).__init__(*args, **kwargs)
         self.topology_api_app = self
         self.tm = TopoManager()
-        self.switch_host_mac = {} # 一个switch连的所有host [switch_id] = [host.mac]
-        self.mac_host_port = {} # 一个switch连的所有host [host.mac] = [host.port.port_no]
+        self.switch_host_mac = {}  # 一个switch连的所有host [switch_id] = [host.mac]
+        self.mac_host_port = {}  # [host.mac] = [host.port.port_no]
 
     @set_ev_cls(event.EventSwitchEnter)
     def handle_switch_add(self, ev):
@@ -55,8 +55,8 @@ class ShortestPathSwitching(app_manager.RyuApp):
 
         # TODO:  Update network topology and flow rules
         self.tm.add_switch(switch)
-        self.switch_host_mac[switch.dp.id] = list() #初始化
-
+        self.switch_host_mac[switch.dp.id] = list()  # 初始化
+        self.update_all_flow_table()
 
     @set_ev_cls(event.EventSwitchLeave)
     def handle_switch_delete(self, ev):
@@ -70,6 +70,8 @@ class ShortestPathSwitching(app_manager.RyuApp):
             self.logger.warn("\t%d:  %s", port.port_no, port.hw_addr)
 
         # TODO:  Update network topology and flow rules
+        self.tm.delete_switch(switch)
+        self.update_all_flow_table()
 
     @set_ev_cls(event.EventHostAdd)
     def handle_host_add(self, ev):
@@ -85,7 +87,9 @@ class ShortestPathSwitching(app_manager.RyuApp):
         # TODO:  Update network topology and flow rules
         self.tm.add_host(host)
         self.switch_host_mac[host.port.dpid].append(host.mac)
-        self.mac_host_port[host.mac]= host.port.port_no
+        self.mac_host_port[host.mac] = host.port.port_no
+
+        self.update_all_flow_table()
 
     @set_ev_cls(event.EventLinkAdd)
     def handle_link_add(self, ev):
@@ -100,6 +104,7 @@ class ShortestPathSwitching(app_manager.RyuApp):
                          dst_port.dpid, dst_port.port_no, dst_port.hw_addr)
 
         # TODO:  Update network topology and flow rules
+        self.update_all_flow_table()
 
     @set_ev_cls(event.EventLinkDelete)
     def handle_link_delete(self, ev):
@@ -115,6 +120,7 @@ class ShortestPathSwitching(app_manager.RyuApp):
                          dst_port.dpid, dst_port.port_no, dst_port.hw_addr)
 
         # TODO:  Update network topology and flow rules
+        self.update_all_flow_table()
 
     @set_ev_cls(event.EventPortModify)
     def handle_port_modify(self, ev):
@@ -128,6 +134,7 @@ class ShortestPathSwitching(app_manager.RyuApp):
                          "UP" if port.is_live() else "DOWN")
 
         # TODO:  Update network topology and flow rules
+        self.update_all_flow_table()
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def packet_in_handler(self, ev):
@@ -150,25 +157,14 @@ class ShortestPathSwitching(app_manager.RyuApp):
             arp_msg = pkt.get_protocols(arp.arp)[0]
 
             if arp_msg.opcode == arp.ARP_REQUEST:
-
                 self.logger.warning("Received ARP REQUEST on switch%d/%d:  Who has %s?  Tell %s",
                                     dp.id, in_port, arp_msg.dst_ip, arp_msg.src_mac)
 
                 # TODO:  Generate a *REPLY* for this request based on your switch state
-                self.get_topology_data()
-                # def send_arp(self, arp_opcode, vlan_id, dst_mac,
-                #              sender_mac, sender_ip,
-                #              target_ip, target_mac,
-                #              src_port, output_port):
-                # Here is an example way to send an ARP packet using the ofctl utilities
-
-                host_list = self.tm.all_hosts
                 mac_answer = 0
-
-
-                for h in host_list:
-                    if h.get_ips()[0] == arp_msg.dst_ip:
-                        mac_answer = h.get_mac()
+                for ip in self.tm.ip_host_mac:
+                    if ip == arp_msg.dst_ip:
+                        mac_answer = self.tm.ip_host_mac[ip]
                         break
 
                 # ofctl.send_arp(arp_opcode=arp.ARP_REPLY, vlan_id=VLANID_NONE,
@@ -180,17 +176,18 @@ class ShortestPathSwitching(app_manager.RyuApp):
                 #                )
 
                 ofctl.send_arp(arp_opcode=arp.ARP_REPLY, vlan_id=VLANID_NONE,
-                               dst_mac =arp_msg.src_mac,
-                               sender_mac = mac_answer, sender_ip=arp_msg.dst_ip,
-                               target_ip=arp_msg.src_ip, target_mac= arp_msg.src_mac,
+                               dst_mac=arp_msg.src_mac,
+                               sender_mac=mac_answer, sender_ip=arp_msg.dst_ip,
+                               target_ip=arp_msg.src_ip, target_mac=arp_msg.src_mac,
                                src_port=ofctl.dp.ofproto.OFPP_CONTROLLER,
                                output_port=in_port
                                )
+                # self.update_all_flow_table()
 
                 print("_________Send ARP____________")
-                self.update_all_flow_table()
-                print("_________UPDATE FLOW TABLE___________")
+                # self.update_all_flow_table()
 
+        # elif eth.ethertype != 35020:
 
     def get_topology_data(self):
         switch_list = topo.get_switch(self.topology_api_app, None)
@@ -202,8 +199,7 @@ class ShortestPathSwitching(app_manager.RyuApp):
 
         for link in links_list:
             link_port_dict[link.src.dpid][link.dst.dpid] = link.src.port_no
-
-        return links, link_port_dict, switches,switch_list
+        return links, link_port_dict, switches, switch_list
         # 我如何获得一个switch连接的所有主机呢？
 
         # self.net.add_nodes_from(switches)
@@ -211,7 +207,7 @@ class ShortestPathSwitching(app_manager.RyuApp):
 
     def Dijkstra(self, n: int, S: int, para_edges: list) -> dict:
         print("Begin  Dijkstra.... ")
-        Graph = [[] for i in range(n + 1)]
+        Graph = [[] for i in range(n + 1)]  # 邻接表
         for edge in para_edges:
             u, v = edge
             Graph[u].append(node(v, 1))
@@ -234,34 +230,34 @@ class ShortestPathSwitching(app_manager.RyuApp):
         return pre
 
     def update_all_flow_table(self):
-        links, link_port_dict, switches,switch_list = self.get_topology_data()
-        snum = len(switches)
-        for i in switch_list: # i 是 switch ！ 不是 switch.dp.id
-            s_dic = self.Dijkstra(snum, i.dp.id, links)
-            ofc = OfCtl_v1_0(i.dp, self.logger)
-            # 如何获得一个switch连的所有list
-            ofp_parser = i.dp.ofproto_parser
-            for k in s_dic:# k 是除i以外所有的 switch的id
-                if s_dic[k] == i.dp.id: #等于本身意味着，一步就可以到达
-                    next_port = link_port_dict[s_dic[k]][k]
-                    print("{} to {} : {}".format(i.dp.id, k, next_port))
-                    # print(i.dp.id+" to "+k+" : "+next_port)
-                else:
-                    next_port = link_port_dict[i.dp.id][s_dic[k]]
-                    print("{} to {} : {}".format(i.dp.id, k, next_port))
-                    # print(i.dp.id+" to "+k+" : "+next_port)
-                for host_mac in self.switch_host_mac[k]:
-                    ofc.set_flow(dl_dst=host_mac, cookie=0, priority=0, dl_type=0,
-                                 actions=[ofp_parser.OFPActionOutput(next_port)])
-            # i 直接连的主机也要明确端口
-                for host_mac in self.switch_host_mac[i.dp.id]:
-                    port = self.mac_host_port[host_mac]
-                    ofc.set_flow(dl_dst=host_mac, cookie=0, priority=0, dl_type=0,
-                                 actions=[ofp_parser.OFPActionOutput(port)])
 
-
-
-
+        links, link_port_dict, switches, switch_list = self.get_topology_data()
+        snum = len(self.switch_host_mac)
+        if len(links) > 0 and snum >= len(switches):
+            print("________Begin update flow table________")
+            for i in switch_list:  # i 是 switch ！ 不是 switch.dp.id
+                s_dic = self.Dijkstra(snum, i.dp.id, links)
+                ofc = OfCtl_v1_0(i.dp, self.logger)
+                # 如何获得一个switch连的所有list
+                ofp_parser = i.dp.ofproto_parser
+                for k in s_dic:  # k 是除i以外所有的 switch的id
+                    if s_dic[k] == i.dp.id:  # 等于本身意味着，一步就可以到达
+                        next_port = link_port_dict[s_dic[k]][k]
+                        print("{} to {} : {}".format(i.dp.id, k, next_port))
+                        # print(i.dp.id+" to "+k+" : "+next_port)
+                    else:
+                        next_port = link_port_dict[i.dp.id][s_dic[k]]
+                        print("{} to {} : {}".format(i.dp.id, k, next_port))
+                        # print(i.dp.id+" to "+k+" : "+next_port)
+                    for host_mac in self.switch_host_mac[k]:
+                        ofc.set_flow(dl_dst=host_mac, cookie=0, priority=0, dl_type=0,
+                                     actions=[ofp_parser.OFPActionOutput(next_port)])
+                    # i 直接连的主机也要明确端口
+                    for host_mac in self.switch_host_mac[i.dp.id]:
+                        port = self.mac_host_port[host_mac]
+                        ofc.set_flow(dl_dst=host_mac, cookie=0, priority=0, dl_type=0,
+                                     actions=[ofp_parser.OFPActionOutput(port)])
+            print("_________End update flow table___________")
 
 
 class node:

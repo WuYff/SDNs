@@ -13,12 +13,14 @@ from ryu.topology.switches import Port, Switch, Link
 from ryu.topology import event, switches
 from ryu.topology.api import get_switch, get_link
 
+
 class Device():
     """Base class to represent an device in the network.
 
     Any device (switch or host) has a name (used for debugging only)
     and a set of neighbors.
     """
+
     def __init__(self, name):
         self.name = name
         self.neighbors = set()
@@ -94,26 +96,37 @@ class TopoManager():
     Example class for keeping track of the network topology
 
     """
+
     def __init__(self):
         # TODO:  Initialize some data structures
-        self.all_hosts = []
         self.all_switches = []
+        self.ip_host_mac = {}
         pass
 
     def add_switch(self, sw):
         name = "switch_{}".format(sw.dp.id)
         switch = TMSwitch(name, sw)
 
-        self.all_switches.append(switch)
+        self.all_switches.append(sw.dp.id)
+
+        # TODO:  Add switch to some data structure(s)
+
+    def delete_switch(self, sw):
+
+        self.all_switches.remove(sw.dp.id)
 
         # TODO:  Add switch to some data structure(s)
 
     def add_host(self, h):
         name = "host_{}".format(h.mac)
         host = TMHost(name, h)
-
-        self.all_hosts.append(host)
+        for ip in h.ipv4:
+            self.ip_host_mac[ip] = h.mac
 
         # TODO:  Add host to some data structure(s)
 
+    def delete_host(self, h):
+        for ip in h.ipv4:
+            self.ip_host_mac[ip] = -1
 
+        # TODO:  Add host to some data structure(s)
