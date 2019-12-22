@@ -28,6 +28,8 @@ from topo_manager_example import TopoManager
 from collections import defaultdict
 
 from queue import PriorityQueue
+from queue import Queue
+from ryu.lib.mac import haddr_to_bin
 
 INF = 0x3f3f3f3f
 para_edges = []
@@ -41,7 +43,11 @@ class ShortestPathSwitching(app_manager.RyuApp):
         self.topology_api_app = self
         self.tm = TopoManager()
         self.switch_host_mac = {}  # 一个switch连的所有host [switch_id] = [host.mac]
+        self.switch_host_ip = {}
+        self.switch_host_port = {}
         self.mac_host_port = {}  # [host.mac] = [host.port.port_no]
+        self.switch_map = {}
+        self.shortest_path = {}
 
     @set_ev_cls(event.EventSwitchEnter)
     def handle_switch_add(self, ev):
@@ -56,7 +62,10 @@ class ShortestPathSwitching(app_manager.RyuApp):
         # TODO:  Update network topology and flow rules
         self.tm.add_switch(switch)
         self.switch_host_mac[switch.dp.id] = list()  # 初始化
+        self.switch_host_ip[switch.dp.id] = list()  # 初始化
+        self.switch_host_port[switch.dp.id] = list()  # 初始化
         self.update_all_flow_table()
+        self.switch_map[switch.dp.id] = switch
 
     @set_ev_cls(event.EventSwitchLeave)
     def handle_switch_delete(self, ev):
@@ -87,6 +96,8 @@ class ShortestPathSwitching(app_manager.RyuApp):
         # TODO:  Update network topology and flow rules
         self.tm.add_host(host)
         self.switch_host_mac[host.port.dpid].append(host.mac)
+        self.switch_host_ip[host.port.dpid].append(host.ipv4)
+        self.switch_host_port[host.port.dpid].append(host.port.port_no)
         self.mac_host_port[host.mac] = host.port.port_no
 
         self.update_all_flow_table()
@@ -155,10 +166,9 @@ class ShortestPathSwitching(app_manager.RyuApp):
 
         if eth.ethertype == ether_types.ETH_TYPE_ARP:
             arp_msg = pkt.get_protocols(arp.arp)[0]
-
             if arp_msg.opcode == arp.ARP_REQUEST:
-                self.logger.warning("Received ARP REQUEST on switch%d/%d:  Who has %s?  Tell %s",
-                                    dp.id, in_port, arp_msg.dst_ip, arp_msg.src_mac)
+                self.logger.warning("Received ARP REQUEST on switch%d/%d:  Who has %s?  Tell %s DST %s",
+                                    dp.id, in_port, arp_msg.dst_ip, arp_msg.src_mac, arp_msg.dst_mac)
 
                 # TODO:  Generate a *REPLY* for this request based on your switch state
                 mac_answer = 0
@@ -166,14 +176,6 @@ class ShortestPathSwitching(app_manager.RyuApp):
                     if ip == arp_msg.dst_ip:
                         mac_answer = self.tm.ip_host_mac[ip]
                         break
-
-                # ofctl.send_arp(arp_opcode=arp.ARP_REPLY, vlan_id=VLANID_NONE,
-                #                dst_mac=arp_msg.src_mac,
-                #                sender_mac=arp_msg.src_mac, sender_ip=arp_msg.src_ip,
-                #                target_ip=arp_msg.dst_ip, target_mac=mac_answer,
-                #                src_port=ofctl.dp.ofproto.OFPP_CONTROLLER,
-                #                output_port=in_port
-                #                )
 
                 ofctl.send_arp(arp_opcode=arp.ARP_REPLY, vlan_id=VLANID_NONE,
                                dst_mac=arp_msg.src_mac,
@@ -199,65 +201,193 @@ class ShortestPathSwitching(app_manager.RyuApp):
 
         for link in links_list:
             link_port_dict[link.src.dpid][link.dst.dpid] = link.src.port_no
+
+        self.print_topology(link_port_dict)
         return links, link_port_dict, switches, switch_list
+
+    def print_topology(self, link_port_dict):
+        print("__________________________Start Printing Topology____________________________")
+        for sw in link_port_dict:
+            print("* For Switch_{} ---------------------".format(sw))
+            print("> Connected Switches :")
+            for to_sw in link_port_dict[sw]:
+                print("Edge: switch_{}/port_{} <-> switch {}/port_{}".format(sw, link_port_dict[sw][to_sw], to_sw,
+                                                                             link_port_dict[to_sw][sw]))
+            print("> Connected  Hosts:")
+            if len(self.switch_host_ip[sw]) ==0:
+                print("No connected hosts.")
+            else:
+                for h in self.switch_host_ip[sw]:
+                    print("Edge: switch_{} <-> host_ip_{}".format(sw,  h))
+        print("__________________________END Printing Topology____________________________")
+
         # 我如何获得一个switch连接的所有主机呢？
 
         # self.net.add_nodes_from(switches)
         # self.net.add_edges_from(links)
 
-    def Dijkstra(self, n: int, S: int, para_edges: list) -> dict:
-        print("Begin  Dijkstra.... ")
-        Graph = [[] for i in range(n + 1)]  # 邻接表
+    def Dijkstra(self,n: int, S: int, para_edges: list) -> (dict, list):
+
+        Graph = [[] for i in range(n + 1)]
         for edge in para_edges:
             u, v = edge
             Graph[u].append(node(v, 1))
+
         dis = [INF for i in range(n + 1)]
         dis[S] = 0
-        pre = {}
+
+        via = {}
+        pre = [0 for i in range(n + 1)]
+        paths = [[] for i in range(n + 1)]
+        paths[S].append(S)
+
         pq = PriorityQueue()
         pq.put(node(S, 0))
         while not pq.empty():
             top = pq.get()
+            if dis[top.id] < top.w:
+                continue
+            if top.id != S:
+                paths[top.id] = paths[pre[top.id]].copy()
+                paths[top.id].append(top.id)
             for i in Graph[top.id]:
                 if dis[i.id] > dis[top.id] + i.w:
                     dis[i.id] = dis[top.id] + i.w
+                    pre[i.id] = top.id
                     if top.id != S:
-                        pre[i.id] = pre[top.id]
+                        via[i.id] = via[top.id]
                     else:
-                        pre[i.id] = i.id
+                        via[i.id] = i.id
                     pq.put(node(i.id, dis[i.id]))
-        print("END  Dijkstra.... ")
-        return pre
+        return via, paths
+    def print_shortest_path(self,switch_list:list):
+        print("________________________Start Printing Shortest Path_____________________________")
+        for i in switch_list:
+            print("* For Switch_{} :".format(i.dp.id))
+            for j in range(1,len(switch_list)):
+                print("> Switch_{} to Switch_{} ".format(i.dp.id,j))
+                print(self.shortest_path[i.dp.id][j])
+        print("__________________________End Printing Shortest Path_____________________________")
 
     def update_all_flow_table(self):
-
         links, link_port_dict, switches, switch_list = self.get_topology_data()
         snum = len(self.switch_host_mac)
         if len(links) > 0 and snum >= len(switches):
             print("________Begin update flow table________")
             for i in switch_list:  # i 是 switch ！ 不是 switch.dp.id
-                s_dic = self.Dijkstra(snum, i.dp.id, links)
+                s_dic, paths = self.Dijkstra(snum, i.dp.id, links)
+                self.shortest_path[i.dp.id] = paths
                 ofc = OfCtl_v1_0(i.dp, self.logger)
                 # 如何获得一个switch连的所有list
                 ofp_parser = i.dp.ofproto_parser
                 for k in s_dic:  # k 是除i以外所有的 switch的id
                     if s_dic[k] == i.dp.id:  # 等于本身意味着，一步就可以到达
                         next_port = link_port_dict[s_dic[k]][k]
-                        print("{} to {} : {}".format(i.dp.id, k, next_port))
+                        # print("{} to {} : {}".format(i.dp.id, k, next_port))
                         # print(i.dp.id+" to "+k+" : "+next_port)
                     else:
                         next_port = link_port_dict[i.dp.id][s_dic[k]]
-                        print("{} to {} : {}".format(i.dp.id, k, next_port))
+                        # print("{} to {} : {}".format(i.dp.id, k, next_port))
                         # print(i.dp.id+" to "+k+" : "+next_port)
                     for host_mac in self.switch_host_mac[k]:
-                        ofc.set_flow(dl_dst=host_mac, cookie=0, priority=0, dl_type=0,
+                        ofc.set_flow(dl_dst=host_mac, cookie=0, priority=0,
                                      actions=[ofp_parser.OFPActionOutput(next_port)])
                     # i 直接连的主机也要明确端口
                     for host_mac in self.switch_host_mac[i.dp.id]:
                         port = self.mac_host_port[host_mac]
-                        ofc.set_flow(dl_dst=host_mac, cookie=0, priority=0, dl_type=0,
+                        ofc.set_flow(dl_dst=host_mac, cookie=0, priority=0,
                                      actions=[ofp_parser.OFPActionOutput(port)])
+
+            self.update_spanning_tree(snum, links, link_port_dict, switch_list)
             print("_________End update flow table___________")
+            self.print_shortest_path(switch_list)
+
+
+
+    def Prim(self, n: int, S: int, para_edges: list) -> list:
+        '''Return a list that contains the edges in the spanning tree.
+        'n' is the total number of nodes, S is an arbitrary start point
+        in the graph, para_edges is the list of the graph edges.
+
+        '''
+        print("Start Spanning Tree Algorithm...")
+
+        Graph = [[] for i in range(n + 1)]
+        for edge in para_edges:
+            u, v = edge
+            Graph[u].append(node(v, 1))
+
+        dis = [INF for i in range(n + 1)]
+        dis[S] = 0
+
+        pre = [-1] * (n + 1)
+
+        pq = PriorityQueue()
+        pq.put(node(S, 0))
+        while not pq.empty():
+            top = pq.get()
+            for i in Graph[top.id]:
+                if dis[i.id] > i.w:
+                    dis[i.id] = i.w
+                    pre[i.id] = top.id
+                    pq.put(node(i.id, dis[i.id]))
+
+        tree_edges = []
+        for i in range(n + 1):
+            if pre[i] != -1:
+                tree_edges.append((i, pre[i]))
+                tree_edges.append((pre[i], i))
+
+        return tree_edges
+
+    def query(self, n: int, S: int, tree_edges: list) -> dict:
+        '''Return a dictionary that describes the children of every node.
+
+        'n' is the total number of nodes, S is an arbitrary start point
+        in the graph, tree_edges is the list of the tree edges.
+
+        '''
+        Graph = [[] for i in range(n + 1)]
+        for edge in tree_edges:
+            u, v = edge
+            Graph[u].append(node(v, 1))
+
+        neighbours = {}
+        for i in range(n + 1):
+            neighbours[i] = []
+
+        q = Queue()
+        q.put(node(S, -1))
+        while not q.empty():
+            top = q.get()
+            for i in Graph[top.id]:
+                if i.id != top.w:
+                    neighbours[top.id].append(i.id)
+                    q.put(node(i.id, top.id))
+
+        return neighbours
+
+    def update_spanning_tree(self, n: int, para_edges: list, link_port_dict, switch_list: list):
+        tree = self.Prim(n, 1, para_edges)
+        print("************ Spanning Tree *************")
+        print(tree)
+        print("*****************************************")
+        for i in switch_list:
+            relationship = self.query(n, i.dp.id, tree)
+            for father in switch_list:
+                ofc = OfCtl_v1_0(father.dp, self.logger)
+                ofp_parser = father.dp.ofproto_parser
+                action_set = list()
+                for each_child in relationship[father.dp.id]:
+                    port = link_port_dict[father.dp.id][each_child]
+                    action_set.append(ofp_parser.OFPActionOutput(port))
+                for host_port in self.switch_host_port[father.dp.id]:
+                    action_set.append(ofp_parser.OFPActionOutput(host_port))
+                for host_ip in self.switch_host_ip[i.dp.id]:
+                    for each_ip in host_ip:
+                        ofc.set_flow(nw_src=each_ip, dl_dst="ff:ff:ff:ff:ff:ff", cookie=0, priority=0,
+                                     dl_type=ether_types.ETH_TYPE_ARP,
+                                     actions=action_set)
 
 
 class node:
