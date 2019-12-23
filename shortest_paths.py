@@ -45,6 +45,7 @@ class ShortestPathSwitching(app_manager.RyuApp):
         self.switch_host_mac = {}  # 一个switch连的所有host [switch_id] = [host.mac]
         self.switch_host_ip = {}
         self.switch_host_port = {}
+        self.switch_host = {}
         self.mac_host_port = {}  # [host.mac] = [host.port.port_no]
         self.switch_map = {}
         self.shortest_path = {}
@@ -64,6 +65,7 @@ class ShortestPathSwitching(app_manager.RyuApp):
         self.switch_host_mac[switch.dp.id] = list()  # 初始化
         self.switch_host_ip[switch.dp.id] = list()  # 初始化
         self.switch_host_port[switch.dp.id] = list()  # 初始化
+        self.switch_host[switch.dp.id] = list()
         self.update_all_flow_table()
         self.switch_map[switch.dp.id] = switch
 
@@ -98,6 +100,7 @@ class ShortestPathSwitching(app_manager.RyuApp):
         self.switch_host_mac[host.port.dpid].append(host.mac)
         self.switch_host_ip[host.port.dpid].append(host.ipv4)
         self.switch_host_port[host.port.dpid].append(host.port.port_no)
+        self.switch_host[host.port.dpid].append(host)
         self.mac_host_port[host.mac] = host.port.port_no
 
         self.update_all_flow_table()
@@ -202,10 +205,10 @@ class ShortestPathSwitching(app_manager.RyuApp):
         for link in links_list:
             link_port_dict[link.src.dpid][link.dst.dpid] = link.src.port_no
 
-        self.print_topology(link_port_dict)
+        self.print_topology(link_port_dict, switches)
         return links, link_port_dict, switches, switch_list
 
-    def print_topology(self, link_port_dict,switches):
+    def print_topology(self, link_port_dict, switches):
 
         print("__________________________Start Printing Topology____________________________")
         if len(switches) == 1:
@@ -214,9 +217,10 @@ class ShortestPathSwitching(app_manager.RyuApp):
                 if self.switch_host_ip[i] and len(self.switch_host_ip[i]) == 0:
                     print("No connected hosts.")
                 else:
-                    for h in self.switch_host_ip[i]:
-                        print("Edge: switch_{} <-> host_ip_{}".format(i, h))
-
+                    # for h in self.switch_host_ip[i]:
+                    #     print("Edge: switch_{} <-> host_ip_{}".format(i, h))
+                    for h in self.switch_host[i]:
+                        print("Edge: switch_{}/port_{}<-> host_ip_{}".format(i, h.port.port_no, h.ipv4))
 
         for sw in link_port_dict:
             print("* For Switch_{} ---------------------".format(sw))
@@ -228,8 +232,10 @@ class ShortestPathSwitching(app_manager.RyuApp):
             if self.switch_host_ip[sw] and len(self.switch_host_ip[sw]) == 0:
                 print("No connected hosts.")
             else:
-                for h in self.switch_host_ip[sw]:
-                    print("Edge: switch_{} <-> host_ip_{}".format(sw, h))
+                # for h in self.switch_host_ip[sw]:
+                #     print("Edge: switch_{} <-> host_ip_{}".format(sw, h))
+                for h in self.switch_host[sw]:
+                    print("Edge: switch_{}/port_{}<-> host_ip_{}".format(sw, h.port.port_no, h.ipv4))
         print("__________________________END Printing Topology____________________________")
 
     def Dijkstra(self, n: int, S: int, para_edges: list) -> (dict, list):
