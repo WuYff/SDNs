@@ -91,19 +91,11 @@ if __name__ == "__main__":
     print(tree)
     print(query(n, 1, tree))
     print(query(n, 2, tree))
+    print(query(n, 3, tree))
 
 
 '''
-9 11
+3 2
 1 2
-1 3
-4 5
-3 4
-2 5
-5 6
-4 8
-6 8
-6 7
-7 8
-7 9
+2 3
 '''

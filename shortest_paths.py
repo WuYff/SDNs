@@ -205,8 +205,19 @@ class ShortestPathSwitching(app_manager.RyuApp):
         self.print_topology(link_port_dict)
         return links, link_port_dict, switches, switch_list
 
-    def print_topology(self, link_port_dict):
+    def print_topology(self, link_port_dict,switches):
+
         print("__________________________Start Printing Topology____________________________")
+        if len(switches) == 1:
+            for i in switches:
+                print("> Connected  Hosts:")
+                if self.switch_host_ip[i] and len(self.switch_host_ip[i]) == 0:
+                    print("No connected hosts.")
+                else:
+                    for h in self.switch_host_ip[i]:
+                        print("Edge: switch_{} <-> host_ip_{}".format(i, h))
+
+
         for sw in link_port_dict:
             print("* For Switch_{} ---------------------".format(sw))
             print("> Connected Switches :")
@@ -214,19 +225,14 @@ class ShortestPathSwitching(app_manager.RyuApp):
                 print("Edge: switch_{}/port_{} <-> switch {}/port_{}".format(sw, link_port_dict[sw][to_sw], to_sw,
                                                                              link_port_dict[to_sw][sw]))
             print("> Connected  Hosts:")
-            if len(self.switch_host_ip[sw]) ==0:
+            if self.switch_host_ip[sw] and len(self.switch_host_ip[sw]) == 0:
                 print("No connected hosts.")
             else:
                 for h in self.switch_host_ip[sw]:
-                    print("Edge: switch_{} <-> host_ip_{}".format(sw,  h))
+                    print("Edge: switch_{} <-> host_ip_{}".format(sw, h))
         print("__________________________END Printing Topology____________________________")
 
-        # 我如何获得一个switch连接的所有主机呢？
-
-        # self.net.add_nodes_from(switches)
-        # self.net.add_edges_from(links)
-
-    def Dijkstra(self,n: int, S: int, para_edges: list) -> (dict, list):
+    def Dijkstra(self, n: int, S: int, para_edges: list) -> (dict, list):
 
         Graph = [[] for i in range(n + 1)]
         for edge in para_edges:
@@ -260,13 +266,17 @@ class ShortestPathSwitching(app_manager.RyuApp):
                         via[i.id] = i.id
                     pq.put(node(i.id, dis[i.id]))
         return via, paths
-    def print_shortest_path(self,switch_list:list):
+
+    def print_shortest_path(self, switch_list: list):
         print("________________________Start Printing Shortest Path_____________________________")
-        for i in switch_list:
-            print("* For Switch_{} :".format(i.dp.id))
-            for j in range(1,len(switch_list)):
-                print("> Switch_{} to Switch_{} ".format(i.dp.id,j))
-                print(self.shortest_path[i.dp.id][j])
+        if len(switch_list) == 1:
+            print("There is only a Single switch in the net work.")
+        else:
+            for i in switch_list:
+                print("* For Switch_{} :".format(i.dp.id))
+                for j in range(1, len(switch_list) + 1):
+                    print("> Switch_{} to Switch_{} ".format(i.dp.id, j))
+                    print(self.shortest_path[i.dp.id][j])
         print("__________________________End Printing Shortest Path_____________________________")
 
     def update_all_flow_table(self):
@@ -283,12 +293,8 @@ class ShortestPathSwitching(app_manager.RyuApp):
                 for k in s_dic:  # k 是除i以外所有的 switch的id
                     if s_dic[k] == i.dp.id:  # 等于本身意味着，一步就可以到达
                         next_port = link_port_dict[s_dic[k]][k]
-                        # print("{} to {} : {}".format(i.dp.id, k, next_port))
-                        # print(i.dp.id+" to "+k+" : "+next_port)
                     else:
                         next_port = link_port_dict[i.dp.id][s_dic[k]]
-                        # print("{} to {} : {}".format(i.dp.id, k, next_port))
-                        # print(i.dp.id+" to "+k+" : "+next_port)
                     for host_mac in self.switch_host_mac[k]:
                         ofc.set_flow(dl_dst=host_mac, cookie=0, priority=0,
                                      actions=[ofp_parser.OFPActionOutput(next_port)])
@@ -297,12 +303,19 @@ class ShortestPathSwitching(app_manager.RyuApp):
                         port = self.mac_host_port[host_mac]
                         ofc.set_flow(dl_dst=host_mac, cookie=0, priority=0,
                                      actions=[ofp_parser.OFPActionOutput(port)])
+        elif len(switches) == 1:
+            for i in switch_list:
+                ofc = OfCtl_v1_0(i.dp, self.logger)
+                # 如何获得一个switch连的所有list
+                ofp_parser = i.dp.ofproto_parser
+                for host_mac in self.switch_host_mac[i.dp.id]:
+                    port = self.mac_host_port[host_mac]
+                    ofc.set_flow(dl_dst=host_mac, cookie=0, priority=0,
+                                 actions=[ofp_parser.OFPActionOutput(port)])
 
-            self.update_spanning_tree(snum, links, link_port_dict, switch_list)
-            print("_________End update flow table___________")
-            self.print_shortest_path(switch_list)
-
-
+        self.update_spanning_tree(snum, links, link_port_dict, switch_list)
+        print("_________End update flow table___________")
+        self.print_shortest_path(switch_list)
 
     def Prim(self, n: int, S: int, para_edges: list) -> list:
         '''Return a list that contains the edges in the spanning tree.
@@ -373,14 +386,20 @@ class ShortestPathSwitching(app_manager.RyuApp):
         print(tree)
         print("*****************************************")
         for i in switch_list:
+
+            print("@ Root: Switch_{} ----------------------------------".format(i.dp.id))
+
             relationship = self.query(n, i.dp.id, tree)
             for father in switch_list:
                 ofc = OfCtl_v1_0(father.dp, self.logger)
                 ofp_parser = father.dp.ofproto_parser
                 action_set = list()
+                print("> For Switch_{} :".format(father.dp.id))
                 for each_child in relationship[father.dp.id]:
                     port = link_port_dict[father.dp.id][each_child]
                     action_set.append(ofp_parser.OFPActionOutput(port))
+                    print(" Switch_{}/Port_{} -> Switch_{}".format(father.dp.id, port, each_child))
+
                 for host_port in self.switch_host_port[father.dp.id]:
                     action_set.append(ofp_parser.OFPActionOutput(host_port))
                 for host_ip in self.switch_host_ip[i.dp.id]:
