@@ -179,24 +179,14 @@ class ShortestPathSwitching(app_manager.RyuApp):
                     if ip == arp_msg.dst_ip:
                         mac_answer = self.tm.ip_host_mac[ip]
                         break
-                if mac_answer != 0:
-                    ofctl.send_arp(arp_opcode=arp.ARP_REPLY, vlan_id=VLANID_NONE,
-                                   dst_mac=arp_msg.src_mac,
-                                   sender_mac=mac_answer, sender_ip=arp_msg.dst_ip,
-                                   target_ip=arp_msg.src_ip, target_mac=arp_msg.src_mac,
-                                   src_port=ofctl.dp.ofproto.OFPP_CONTROLLER,
-                                   output_port=in_port
-                                   )
-                else:
-                    data = msg.data
-                    ofproto = dp.ofproto
-                    ofp_parser = dp.ofproto_parser
-                    actions = [ofp_parser.OFPActionOutput(ofproto.OFPP_FLOOD)]
-                    out_flood = ofp_parser.OFPPacketOut(
-                        datapath=dp, buffer_id=msg.buffer_id, in_port=msg.in_port,
-                        actions=actions, data=data)
-                    dp.send_msg(out_flood)
 
+                ofctl.send_arp(arp_opcode=arp.ARP_REPLY, vlan_id=VLANID_NONE,
+                               dst_mac=arp_msg.src_mac,
+                               sender_mac=mac_answer, sender_ip=arp_msg.dst_ip,
+                               target_ip=arp_msg.src_ip, target_mac=arp_msg.src_mac,
+                               src_port=ofctl.dp.ofproto.OFPP_CONTROLLER,
+                               output_port=in_port
+                               )
                 # self.update_all_flow_table()
 
                 print("_________Send ARP____________")
@@ -227,10 +217,8 @@ class ShortestPathSwitching(app_manager.RyuApp):
                 if self.switch_host_ip[i] and len(self.switch_host_ip[i]) == 0:
                     print("No connected hosts.")
                 else:
-                    # for h in self.switch_host_ip[i]:
-                    #     print("Edge: switch_{} <-> host_ip_{}".format(i, h))
                     for h in self.switch_host[i]:
-                        print("Edge: switch_{}/port_{}<-> host_ip_{}".format(i, h.port.port_no, h.ipv4))
+                        print("Edge: switch_{}/port_{} <-> host_ip_{}".format(i, h.port.port_no,h.ipv4))
 
         for sw in link_port_dict:
             print("* For Switch_{} ---------------------".format(sw))
@@ -328,7 +316,7 @@ class ShortestPathSwitching(app_manager.RyuApp):
                     port = self.mac_host_port[host_mac]
                     ofc.set_flow(dl_dst=host_mac, cookie=0, priority=0,
                                  actions=[ofp_parser.OFPActionOutput(port)])
-        # test flood
+
         self.update_spanning_tree(snum, links, link_port_dict, switch_list)
         print("_________End update flow table___________")
         self.print_shortest_path(switch_list)
