@@ -17,6 +17,13 @@ CS305 final project
 
 # Implementation
 ## Function 1 Controller handle ARP packet
+Code Logic and Struture :
+
+![](./images/r2.png)
+
+Code detail :
+
+![](./images/c1.png)
 
 ## Function 2 Update Flow Table
 ### code structure
