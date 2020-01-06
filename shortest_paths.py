@@ -29,7 +29,6 @@ from collections import defaultdict
 
 from queue import PriorityQueue
 from queue import Queue
-from ryu.lib.mac import haddr_to_bin
 
 INF = 0x3f3f3f3f
 para_edges = []
@@ -42,12 +41,12 @@ class ShortestPathSwitching(app_manager.RyuApp):
         super(ShortestPathSwitching, self).__init__(*args, **kwargs)
         self.topology_api_app = self
         self.tm = TopoManager()
-        self.switch_host_mac = {}  # 一个switch连的所有host [switch_id] = [host.mac]
-        self.switch_host_ip = {}
-        self.switch_host_port = {}
-        self.switch_host = {}
-        self.mac_host_port = {}  # [host.mac] = [host.port.port_no]
-        self.switch_map = {}
+
+        self.switch_host_mac = {}  # 一个switch连的所有host的mac地址  switch_id : [host.mac]
+        self.switch_host_ip = {}  # 一个switch连的所有host的ip地址  switch_id:[host.ip]
+        self.switch_host_port = {}  # 一个switch上的所有连接host的端口 switch_id:[switch.port_id]
+        self.switch_host = {}  # 一个switch上的所有连接host实体 switch_id:[host]
+        self.mac_host_port = {}  # 一个host连接的switch端口 host.mac:[host.port.port_no]
         self.shortest_path = {}
 
     @set_ev_cls(event.EventSwitchEnter)
@@ -65,9 +64,9 @@ class ShortestPathSwitching(app_manager.RyuApp):
         self.switch_host_mac[switch.dp.id] = list()  # 初始化
         self.switch_host_ip[switch.dp.id] = list()  # 初始化
         self.switch_host_port[switch.dp.id] = list()  # 初始化
-        self.switch_host[switch.dp.id] = list()
-        self.update_all_flow_table()
-        self.switch_map[switch.dp.id] = switch
+        self.switch_host[switch.dp.id] = list()  # 初始化
+
+        self.update_all_flow_table()  # 更新流表
 
     @set_ev_cls(event.EventSwitchLeave)
     def handle_switch_delete(self, ev):
@@ -82,7 +81,7 @@ class ShortestPathSwitching(app_manager.RyuApp):
 
         # TODO:  Update network topology and flow rules
         self.tm.delete_switch(switch)
-        self.update_all_flow_table()
+        self.update_all_flow_table()  # 更新流表
 
     @set_ev_cls(event.EventHostAdd)
     def handle_host_add(self, ev):
@@ -96,14 +95,16 @@ class ShortestPathSwitching(app_manager.RyuApp):
                          host.port.dpid, host.port.port_no, host.port.hw_addr)
 
         # TODO:  Update network topology and flow rules
+
         self.tm.add_host(host)
+        # 更新有关拓扑结构的记录
         self.switch_host_mac[host.port.dpid].append(host.mac)
         self.switch_host_ip[host.port.dpid].append(host.ipv4)
         self.switch_host_port[host.port.dpid].append(host.port.port_no)
         self.switch_host[host.port.dpid].append(host)
         self.mac_host_port[host.mac] = host.port.port_no
 
-        self.update_all_flow_table()
+        self.update_all_flow_table()  # 更新流表
 
     @set_ev_cls(event.EventLinkAdd)
     def handle_link_add(self, ev):
@@ -118,7 +119,7 @@ class ShortestPathSwitching(app_manager.RyuApp):
                          dst_port.dpid, dst_port.port_no, dst_port.hw_addr)
 
         # TODO:  Update network topology and flow rules
-        self.update_all_flow_table()
+        self.update_all_flow_table()  # 更新流表
 
     @set_ev_cls(event.EventLinkDelete)
     def handle_link_delete(self, ev):
@@ -134,7 +135,7 @@ class ShortestPathSwitching(app_manager.RyuApp):
                          dst_port.dpid, dst_port.port_no, dst_port.hw_addr)
 
         # TODO:  Update network topology and flow rules
-        self.update_all_flow_table()
+        self.update_all_flow_table()  # 更新流表
 
     @set_ev_cls(event.EventPortModify)
     def handle_port_modify(self, ev):
@@ -148,7 +149,7 @@ class ShortestPathSwitching(app_manager.RyuApp):
                          "UP" if port.is_live() else "DOWN")
 
         # TODO:  Update network topology and flow rules
-        self.update_all_flow_table()
+        self.update_all_flow_table()  # 更新流表
 
     @set_ev_cls(ofp_event.EventOFPPacketIn, MAIN_DISPATCHER)
     def packet_in_handler(self, ev):
@@ -175,11 +176,13 @@ class ShortestPathSwitching(app_manager.RyuApp):
 
                 # TODO:  Generate a *REPLY* for this request based on your switch state
                 mac_answer = 0
+                # search for the mac address
                 for ip in self.tm.ip_host_mac:
                     if ip == arp_msg.dst_ip:
                         mac_answer = self.tm.ip_host_mac[ip]
                         break
                 if mac_answer != 0:
+                    # if the mac address exists, controller send the ARP reply
                     ofctl.send_arp(arp_opcode=arp.ARP_REPLY, vlan_id=VLANID_NONE,
                                    dst_mac=arp_msg.src_mac,
                                    sender_mac=mac_answer, sender_ip=arp_msg.dst_ip,
@@ -188,6 +191,7 @@ class ShortestPathSwitching(app_manager.RyuApp):
                                    output_port=in_port
                                    )
                 else:
+                    # if the mac address does not exist, the ARP request will flood.
                     data = msg.data
                     ofproto = dp.ofproto
                     ofp_parser = dp.ofproto_parser
@@ -197,18 +201,12 @@ class ShortestPathSwitching(app_manager.RyuApp):
                         actions=actions, data=data)
                     dp.send_msg(out_flood)
 
-                # self.update_all_flow_table()
-
                 print("_________Send ARP____________")
-                # self.update_all_flow_table()
-
-        # elif eth.ethertype != 35020:
 
     def get_topology_data(self):
         switch_list = topo.get_switch(self.topology_api_app, None)
         switches = [switch.dp.id for switch in switch_list]
         links_list = topo.get_link(self.topology_api_app, None)
-        # links = [(link.src.dpid, link.dst.dpid, {'port': link.src.port_no}) for link in links_list]
         links = [(link.src.dpid, link.dst.dpid) for link in links_list]
         link_port_dict = defaultdict(dict)
 
@@ -227,8 +225,6 @@ class ShortestPathSwitching(app_manager.RyuApp):
                 if self.switch_host_ip[i] and len(self.switch_host_ip[i]) == 0:
                     print("No connected hosts.")
                 else:
-                    # for h in self.switch_host_ip[i]:
-                    #     print("Edge: switch_{} <-> host_ip_{}".format(i, h))
                     for h in self.switch_host[i]:
                         print("Edge: switch_{}/port_{}<-> host_ip_{}".format(i, h.port.port_no, h.ipv4))
 
@@ -242,14 +238,18 @@ class ShortestPathSwitching(app_manager.RyuApp):
             if self.switch_host_ip[sw] and len(self.switch_host_ip[sw]) == 0:
                 print("No connected hosts.")
             else:
-                # for h in self.switch_host_ip[sw]:
-                #     print("Edge: switch_{} <-> host_ip_{}".format(sw, h))
+
                 for h in self.switch_host[sw]:
                     print("Edge: switch_{}/port_{}<-> host_ip_{}".format(sw, h.port.port_no, h.ipv4))
         print("__________________________END Printing Topology____________________________")
 
     def Dijkstra(self, n: int, S: int, para_edges: list) -> (dict, list):
-
+        """
+        :param n:
+        :param S:
+        :param para_edges:
+        :return:
+        """
         Graph = [[] for i in range(n + 1)]
         for edge in para_edges:
             u, v = edge
@@ -333,12 +333,14 @@ class ShortestPathSwitching(app_manager.RyuApp):
         print("_________End update flow table___________")
         self.print_shortest_path(switch_list)
 
+    # Prim 算法用与生成最小生成树
     def Prim(self, n: int, S: int, para_edges: list) -> list:
-        '''Return a list that contains the edges in the spanning tree.
-        'n' is the total number of nodes, S is an arbitrary start point
-        in the graph, para_edges is the list of the graph edges.
-
-        '''
+        """
+        :param n: the largest number of nodes (switch_id)
+        :param S:  an arbitrary start point (switch_id)
+        :param para_edges: the list of the graph edges, in a bidirectional format e.g. [ab,ba]
+        :return: a list that contains the edges in the spanning tree
+        """
         print("Start Spanning Tree Algorithm...")
 
         Graph = [[] for i in range(n + 1)]
@@ -371,10 +373,8 @@ class ShortestPathSwitching(app_manager.RyuApp):
 
     def query(self, n: int, S: int, tree_edges: list) -> dict:
         '''Return a dictionary that describes the children of every node.
-
         'n' is the total number of nodes, S is an arbitrary start point
         in the graph, tree_edges is the list of the tree edges.
-
         '''
         Graph = [[] for i in range(n + 1)]
         for edge in tree_edges:
@@ -397,16 +397,24 @@ class ShortestPathSwitching(app_manager.RyuApp):
         return neighbours
 
     def update_spanning_tree(self, n: int, para_edges: list, link_port_dict, switch_list: list):
+        """
+
+        :param n:
+        :param para_edges:
+        :param link_port_dict:
+        :param switch_list:
+        :return:
+        """
         tree = self.Prim(n, 1, para_edges)
         print("************ Spanning Tree *************")
         print(tree)
         print("*****************************************")
-        for i in switch_list:
+        for i in switch_list:  # 网络中每一个switch都作为root
 
             print("@ Root: Switch_{} ----------------------------------".format(i.dp.id))
 
             relationship = self.query(n, i.dp.id, tree)
-            for father in switch_list:
+            for father in switch_list:  # 对于网络中每一个switch
                 ofc = OfCtl_v1_0(father.dp, self.logger)
                 ofp_parser = father.dp.ofproto_parser
                 action_set = list()
