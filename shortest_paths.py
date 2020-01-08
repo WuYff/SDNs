@@ -306,23 +306,25 @@ class ShortestPathSwitching(app_manager.RyuApp):
                 ofc = OfCtl_v1_0(i.dp, self.logger)
                 # 如何获得一个switch连的所有list
                 ofp_parser = i.dp.ofproto_parser
-                for k in s_dic:  # k 是除i以外所有的 switch的id
+                # 最短路径，流表更新
+                for k in s_dic:
                     if s_dic[k] == i.dp.id:  # 等于本身意味着，一步就可以到达
                         next_port = link_port_dict[s_dic[k]][k]
                     else:
                         next_port = link_port_dict[i.dp.id][s_dic[k]]
+                    ## 用目的地的mac地址进行match
                     for host_mac in self.switch_host_mac[k]:
                         ofc.set_flow(dl_dst=host_mac, cookie=0, priority=0,
                                      actions=[ofp_parser.OFPActionOutput(next_port)])
-                    # i 直接连的主机也要明确端口
+                    # 交换机直接连的主机也要明确端口
                     for host_mac in self.switch_host_mac[i.dp.id]:
                         port = self.mac_host_port[host_mac]
                         ofc.set_flow(dl_dst=host_mac, cookie=0, priority=0,
                                      actions=[ofp_parser.OFPActionOutput(port)])
         elif len(switches) == 1:
+            #当网络中只有一个交换机的时候，特殊处理。
             for i in switch_list:
                 ofc = OfCtl_v1_0(i.dp, self.logger)
-                # 如何获得一个switch连的所有list
                 ofp_parser = i.dp.ofproto_parser
                 for host_mac in self.switch_host_mac[i.dp.id]:
                     port = self.mac_host_port[host_mac]
@@ -419,13 +421,17 @@ class ShortestPathSwitching(app_manager.RyuApp):
                 ofp_parser = father.dp.ofproto_parser
                 action_set = list()
                 print("> For Switch_{} :".format(father.dp.id))
+                # 指定当前交换机要output到其他switch的所有port，添加到action_set中
                 for each_child in relationship[father.dp.id]:
                     port = link_port_dict[father.dp.id][each_child]
                     action_set.append(ofp_parser.OFPActionOutput(port))
                     print(" Switch_{}/Port_{} -> Switch_{}".format(father.dp.id, port, each_child))
 
+                # 指定当前交换机要output到其他host的所有port，添加到action_set中
                 for host_port in self.switch_host_port[father.dp.id]:
                     action_set.append(ofp_parser.OFPActionOutput(host_port))
+
+                # 更新流表，ARP包通过广播地址和source address的ip地址来match
                 for host_ip in self.switch_host_ip[i.dp.id]:
                     for each_ip in host_ip:
                         ofc.set_flow(nw_src=each_ip, dl_dst="ff:ff:ff:ff:ff:ff", cookie=0, priority=0,
