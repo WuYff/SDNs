@@ -1,4 +1,4 @@
-# SDNs 
+# SDNs Report
 CS305 final project
 
 11712738 武羿
@@ -72,60 +72,72 @@ Evey time when the topology of the network is changed, we get the topology data 
 
 
 ## 3. Test
-###3.1 Mininet triangle
+### 3.1 Mininet triangle
 ![](./images/t.png)
-1. Test command 'pingall'
+1. **Test command 'pingall'**
 
 ![](./images/pingall.png)
 
 
-2. ping an unexist ip address 10.0.0.100
+2. **ping an unexist ip address 10.0.0.100**
 
 ![](./images/ping_2.png)
 
 Use TCPDUMP to capture arp  packet
 No flood ,only 3 ARP request packtes captured.
 
-![](./images/tcpdump_2.png)
+![](./images/no_flood.png)
 
-3. Print Shortest Path
+3. **Print Shortest Path**
 ![](./images/shortest_1_triangle.png)
 
-4. Print topology graph
+4. **Print topology graph**
 ![](./images/triangle_totology.png)
 
-5. Print Spanning Tree
+5. **Print Spanning Tree**
 Notice that for each edge, we print bidirectionally.
 
 ![](./images/spanning_tree.png)
 
 ![](./images/sp_red.png)
 
-6. Change topology
+6. **Change topology**
 ![](./images/change.png)
 
 ![](./images/t1.png)
 
-Shortest Path after change
+**Shortest Path after change**
 
 ![](./images/shortest_path_after_change.png)
 
-Spanning tree and topology after change
+**Spanning tree and topology after change**
 
 ![](./images/spanning_tree_new.png)
 
-Flow table after change
+**Flow table after change**
 
 ![](./images/flow_table_after_change.png)
 
-##4. Contribution
+### 3.2 Mininet someloops
+![](./images/sl.png)
+
+1. Print Shortest path from s1 to other switches.
+![](./images/sl1.png)
+
+2. **Change topology**
+![](./images/sl3.png)
+
+3. **Print changed Shortest path from s1 to other switches.**
+![](./images/sl2.png)
+
+## 4. Contribution
 Id| name | Percentage |   Task 
 -|-|-|-
 11712738 |武羿 | 33.3%| Implement shortest path and flooding without loops, Controller ARP packet handle |
 11712121| 胡玉斌 | 33.3% | Configure the environment，implement flooding without loops|
 11612003| 彭可 | 33.3% | Implement shortest path and alogrithms :Dijskta and Prim |
 
-##5. Conclusion
+## 5. Conclusion
 Through this project, we have a deeper understanding of the SDN. We learned how to code with RYU and how to use Mininet. It is very conveninet to control the whole network using just one controller. We also learned how to implement the shortest path and flooding without loops in practice.
 
 The problem we met during the project: it is very important to "sudo mn -c ", that is to clean the previous mininet network every time you want to start a new one. Otherwise, the function of your code may not work well unexpectedly, even your codes are totally right.
