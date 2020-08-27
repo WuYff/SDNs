@@ -1,9 +1,9 @@
 # SDNs 
 CS305 final project
 
-11712738 武羿
-11712121 胡玉斌
-11612003 彭可
+11712738 Yi Wu
+11712121 Yubin Hu
+11612003 Ke Peng
 ## 1. Command 
 $ ryu-manager --observe-links shortest_paths.py
 
